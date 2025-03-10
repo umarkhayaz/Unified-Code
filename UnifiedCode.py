@@ -9,80 +9,109 @@ import time
 import sys
 import csv
 from datetime import datetime
+
 #  Determine the start time for the analysis
 startTime = datetime.now()
-
-
-strength_surface_choice = int(sys.argv[1])            # 1 for DP, 2 for MC
-
-if strength_surface_choice==1:
-    folder_prefix = '_DP'
-elif strength_surface_choice==2:
-    folder_prefix = '_MC'
-else:
-    raise ValueError("Invalid choice for the strength surface. Choose 1 for Ducker Prager, or 2 for Mohr Columb criterion.")
-
-#For DP: 1: sts sss, 2:sts sbs, 3:sts shs; For MC: 1: sts sss, 2: sts scs, 3: sss sbs
-calibrationchoice = int(sys.argv[2]) 
-I1_correction = 1 #1 if you want to correct for negative I1 in phase field SS
-#1 if you want to use shs_DP in Kamarei Delta_eps, 2 if you want to use the corresponding shs
-shs_delta_choice = int(sys.argv[3])
-
-
-# Material properties
-E, nu = 9800, 0.13      #Young's modulus and Poisson's ratio
-Gc= 0.091125            #Critical energy release rate
-sts, scs= 27, 77        #Tensile strength and compressive strength
-
-
-lch=3*Gc*E/8/(sts**2)       #Irwin characteristic length
-eps= float(sys.argv[4])     #The regularization length
-h = float(sys.argv[5])
-
-T = int(sys.argv[5])
-Totalsteps= int(sys.argv[6])
-loadfactor = float(sys.argv[7])                      #multiplier on load compared to expected critical stress
-#Critical value of phase field parameter to break code
-
-
-z_penalty_factor = float(sys.argv[8])                #multiplier to enforce strictness of z irreversibility
-eta=float(sys.argv[9])                               #non-zero minimum numerical stiffness coefficient
-stag_iter_max = int(sys.argv[10])
-
-linear_solver_for_u = int(sys.argv[11])
-non_linear_solver_choice =  int(sys.argv[12])        # solver choice for non linear solver inside snes
-paraview_at_step = int(sys.argv[13])
-disp = int(sys.argv[14])                             # maximum displacement # In case Mode II, Mode III, 
-problem_dim = int(sys.argv[15])                      # Change to 3 for a 3D problem
 
 # Problem description
 comm = MPI.comm_world 
 comm_rank = MPI.rank(comm)
 
-#Geometry of the single edge notch geometry
-ac = 0.01                                             #notch length
-W, L = 100, 150                                       #making use of symmetry, the geometry is 6x40, see last example in JMPS 2020
-Lz = 1
-CrackZ = 10
 
 
-# ___________________________________________________________________________________________________________________________________________________________
 
+I1_correction = 1
+#------------------------------------------------
+# Material properties 
+#------------------------------------------------
+E   = float(sys.argv[1])
+nu  = float(sys.argv[2])
+Gc  = float(sys.argv[3])
+sts = float(sys.argv[4])
+scs = float(sys.argv[5])
 
-# Criterion choice for phase_model == 2
-vonMises_or_Rankine = int(sys.argv[16])  # 1 for von Mises, 2 for Rankine
+#------------------------------------------------
+# Regularization length and mesh refinement parameter
+#------------------------------------------------
+eps = float(sys.argv[6])
+h   = float(sys.argv[7])
 
+#------------------------------------------------
+# Time-stepping parameters
+#------------------------------------------------
+T           = float(sys.argv[8])
+Totalsteps  = int(sys.argv[9])
+loadfactor  = float(sys.argv[10])
+
+#------------------------------------------------
+# Phase-field parameters
+#------------------------------------------------
+z_crit           = float(sys.argv[11])
+z_penalty_factor = float(sys.argv[12])
+eta              = float(sys.argv[13])
+stag_iter_max    = int(sys.argv[14])
+
+#------------------------------------------------
+# Solver choices
+#------------------------------------------------
+linear_solver_for_u      = int(sys.argv[15])
+non_linear_solver_choice = int(sys.argv[16])
+paraview_at_step         = int(sys.argv[17])
+disp                     = float(sys.argv[18])
+problem_dim              = int(sys.argv[19])
+
+#------------------------------------------------
+# Geometry parameters (for the single edge notch problem)
+#------------------------------------------------
+ac     = float(sys.argv[20])
+W      = float(sys.argv[21])
+L      = float(sys.argv[22])
+Lz     = float(sys.argv[23])
+CrackZ = float(sys.argv[24])
+
+#------------------------------------------------
+# Additional problem parameters
+#------------------------------------------------
+markBC_choice      = int(sys.argv[25])
+mesh_choice        = int(sys.argv[26])
+notch_angle_choice = int(sys.argv[27])
+DirichletBC_choice = int(sys.argv[28])
+problem_type       = int(sys.argv[29])
+
+#------------------------------------------------
+# Compute derived quantities
+#------------------------------------------------
+lch = 3 * Gc * E / (8 * (sts**2))
+
+#------------------------------------------------
+# Strength and calibration choices 
+#------------------------------------------------
+strength_surface_choice = int(sys.argv[30])
+if strength_surface_choice == 1:
+    folder_prefix = '_DP'
+elif strength_surface_choice == 2:
+    folder_prefix = '_MC'
+else:
+    raise ValueError("Invalid strength surface choice. Choose 1 for DP or 2 for MC.")
+
+calibrationchoice = int(sys.argv[31])
+shs_delta_choice = int(sys.argv[32])
+
+#------------------------------------------------
+# Criterion for phase_model == 2
+#------------------------------------------------
+vonMises_or_Rankine = int(sys.argv[33])
 if vonMises_or_Rankine == 1:
     folder_prefix += '_vonMises'
 elif vonMises_or_Rankine == 2:
-    folder_prefix += 'Rankine'
-else: 
-    raise ValueError("Invalid criterion choice. Choose 1 for vonMises criterion, or 2 for Rankine criterion.")
+    folder_prefix += '_Rankine'
+else:
+    raise ValueError("Invalid criterion choice. Choose 1 for von Mises or 2 for Rankine.")
 
-
-# Model choices
-phase_model = int(sys.argv[17])  # 1, 2, 3, or 4
-
+#------------------------------------------------
+# Phase field model
+#------------------------------------------------
+phase_model = int(sys.argv[34])
 if phase_model == 1:
     folder_prefix += '_Nucleation'
 elif phase_model == 2:
@@ -92,12 +121,13 @@ elif phase_model == 3:
 elif phase_model == 4:
     folder_prefix += '_Miehe_2015'
 else:
-    raise ValueError("Invalid Phase Field Model choice. Choose 1 for Nucleation, 2 for PF_CZM, 3 for Variational, or 4 for Miehe_2015")
+    raise ValueError("Invalid Phase Field Model choice.")
 
-variational_model = int(sys.argv[18])  # 1 for Star Convex, 2 for Vol-Dev
-stress_state_choice = int(sys.argv[19])  # 1 for Plane Stress, 2 for Plane Strain, 3 for 3D
-
-# Choose Elasticity Params if Plain Stress, Plain Strain, or 3D
+#------------------------------------------------
+# Variational model and stress state
+#------------------------------------------------
+variational_model = int(sys.argv[35])
+stress_state_choice = int(sys.argv[36])
 if stress_state_choice == 1:
     folder_prefix += '_PlaneStress'
 elif stress_state_choice == 2:
@@ -105,56 +135,87 @@ elif stress_state_choice == 2:
 elif stress_state_choice == 3:
     folder_prefix += '_3D'
 else:
-    raise ValueError("Invalid stress state choice. Choose 1 for Plane Stress, 2 for Plane Strain, or 3 for 3D.")
+    raise ValueError("Invalid stress state choice. Choose 1, 2, or 3.")
 
-
-# Read boundary condition choice
-markBC_choice = int(sys.argv[20])  # 1 for Surfing, 2 for Mode_I, etc.
-
-# Read mesh choice and notch angle choice
-mesh_choice = int(sys.argv[21])  # 1 for Surfing, 2 for Mode_I, etc.
-notch_angle_choice = int(sys.argv[22])  # 1 for 45 degree, 2 for 30 degree   # only for 4-P bending test
-
-# Read the DirichletBC_choice argument
-DirichletBC_choice = int(sys.argv[23])
-
-# Read the problem type choice argument
-problem_type = int(sys.argv[24])
 
 # ___________________________________________________________________________________________________________________________________________________________
-# Initialize an empty mesh object
+
+"""
+===========================================================================
+Mesh Conversion Pre-Processing Instructions
+===========================================================================
+Before running this FEniCS simulation code, you must first convert the 
+Gmsh-generated .msh file into XDMF format for use with FEniCS. This is 
+done using a separate Python script (2d_gmsh_convert.py) that employs 
+the meshio library to generate two XDMF files:
+
+  1. <filename>.xdmf: Contains the 2D mesh (e.g., triangle elements) of 
+     the domain.
+  2. facet_<filename>.xdmf: Contains the boundary facet data (e.g., line 
+     elements) with physical markers as defined in your Gmsh script.
+
+Example usage of the conversion script:
+    python 2d_gmsh_convert.py crack or
+    python 3d_gmsh_convert.py crack
+
+This command reads the file 'crack.msh' and produces 'crack.xdmf' and 
+'facet_crack.xdmf'. These files are then used by the FEniCS code below 
+to load the mesh and boundary information.
+
+Make sure that:
+  - The physical groups in your Gmsh script (e.g., "Top", "Bottom", 
+    "Left", "Right", "Crack", etc.) are correctly defined.
+  - The conversion script properly extracts cell data and prunes the 
+    z-coordinate (if a 2D mesh is desired).
+  - The output XDMF files are placed in the appropriate location so that 
+    they can be read by the FEniCS code (adjust the file paths as needed).
+
+Once the conversion is complete, run this FEniCS code to perform the 
+simulation.
+===========================================================================
+"""
+
+# -----------------------------------------------------
+# Mesh Loading
+# -----------------------------------------------------
 mesh = Mesh()
 
+# File names for the mesh (domain) and the boundary facets
 meshname = "crack.xdmf"
 facet_meshname = "facet_crack.xdmf"
 
-# Read the .xdmf  file data into mesh object
+# Read the mesh from the XDMF file
 with XDMFFile(meshname) as infile:
     infile.read(mesh)
-    
-# Extract initial mesh coords
+
+# Get spatial coordinates (if needed)
 x = SpatialCoordinate(mesh)
 
-
-# Read the subdomain data stored in the *.xdmf file
+# -----------------------------------------------------
+# Load Domain (Cell) Markers from the XDMF File
+# -----------------------------------------------------
+# Create a MeshValueCollection for 2D cell data.
 mvc = MeshValueCollection("size_t", mesh, 2)
 with XDMFFile(meshname) as infile:
     infile.read(mvc, "name_to_read")
-
+# Convert to a MeshFunction for use in integration over the domain.
 mf = cpp.mesh.MeshFunctionSizet(mesh, mvc)
 
-# Read mesh boundary facets.
-# Specify parameters of 1-D mesh function object
+# -----------------------------------------------------
+# Load Boundary (Facet) Markers from the XDMF File
+# -----------------------------------------------------
+# Create a MeshValueCollection for 1D (facet) data.
 mvc_1d = MeshValueCollection("size_t", mesh, 1)
-
-# Read the   *.xdmf  data into mesh function object
 with XDMFFile(facet_meshname) as infile:
     infile.read(mvc_1d, "name_to_read")
-
-# Store boundary facets data
+# Convert to a MeshFunction for boundary integration.
 facets = cpp.mesh.MeshFunctionSizet(mesh, mvc_1d)
 
+# -----------------------------------------------------
+# Define Integration Measure for Boundary Facets
+# -----------------------------------------------------
 ds = Measure('ds', domain=mesh, subdomain_data=facets)
+
 # ___________________________________________________________________________________________________________________________________________________________
 
 
@@ -183,7 +244,8 @@ n = FacetNormal(mesh)
 m = as_vector([n[1], -n[0]])
 # ___________________________________________________________________________________________________________________________________________________________
 
-righttop = CompiledSubDomain("abs(x[0]-W)<1e-4 && abs(x[1]-L/2)<1e-4")
+righttop = CompiledSubDomain("abs(x[0] - %f) < 1e-4 && abs(x[1] - %f) < 1e-4" % (W, L/2))
+#righttop = CompiledSubDomain("abs(x[0]-W)<1e-4 && abs(x[1]-L/2)<1e-4")
 cracktip = CompiledSubDomain("abs(x[1]-0.0)<1e-4 && x[0]<ac+h && x[0]>ac-2*eps", ac=ac, h=h, eps=eps)
 outer = CompiledSubDomain("x[1]>L/10", L=L)
 leftbot = CompiledSubDomain("abs(x[1]-side)<1e-4 && abs(x[0]-side)<1e-4", side=-W)
@@ -234,31 +296,40 @@ Y = FunctionSpace(mesh, "CG", 1)         #Function space for z
 
 
 
-if DirichletBC_choice == 1:                                   # Surfing
-
-    c = Expression("K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1],(x[0]-V*(t+0.1)))))*cos(atan2(x[1],(x[0]-V*(t+0.1)))/2)", degree=4, t=0, V=20, K1=30, mu=4336.28, kap=2.54)
-    r = Expression("K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1],(x[0]-V*(t+0.1)))))*sin(atan2(x[1],(x[0]-V*(t+0.1)))/2)", degree=4, t=0, V=20, K1=30, mu=4336.28, kap=2.54)
-    c0 = Expression("(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1],(x[0]-V*(t+0.1)))))*cos(atan2(x[1],(x[0]-V*(t+0.1)))/2))-(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(tau+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1],(x[0]-V*(tau+0.1)))))*cos(atan2(x[1],(x[0]-V*(tau+0.1)))/2))", degree=4, t=0, tau=0, V=20, K1=30, mu=4336.28, kap=2.54)
-    r0 = Expression("(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1],(x[0]-V*(t+0.1)))))*sin(atan2(x[1],(x[0]-V*(t+0.1)))/2))-(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(tau+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1],(x[0]-V*(tau+0.1)))))*sin(atan2(x[1],(x[0]-V*(tau+0.1)))/2))", degree=4, t=0, tau=0, V=20, K1=30, mu=4336.28, kap=2.54)
-
-    # Boundary conditions setup
-    bc_rt= DirichletBC(V.sub(0), Constant(0.0), righttop, method='pointwise')
+if DirichletBC_choice == 1:   # Surfing Problem
+    # Define displacement expressions (for u)
+    c  = Expression("K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1], (x[0]-V*(t+0.1)))))*cos(atan2(x[1], (x[0]-V*(t+0.1)))/2)",
+                    degree=4, t=0, V=20, K1=30, mu=4336.28, kap=2.54)
+    r  = Expression("K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1], (x[0]-V*(t+0.1)))))*sin(atan2(x[1], (x[0]-V*(t+0.1)))/2)",
+                    degree=4, t=0, V=20, K1=30, mu=4336.28, kap=2.54)
+    c0 = Expression("(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1], (x[0]-V*(t+0.1)))))*cos(atan2(x[1], (x[0]-V*(t+0.1)))/2))"
+                    "-(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(tau+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1], (x[0]-V*(tau+0.1)))))*cos(atan2(x[1], (x[0]-V*(tau+0.1)))/2))",
+                    degree=4, t=0, tau=0, V=20, K1=30, mu=4336.28, kap=2.54)
+    r0 = Expression("(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(t+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1], (x[0]-V*(t+0.1)))))*sin(atan2(x[1], (x[0]-V*(t+0.1)))/2))"
+                    "-(K1/(2*mu)*sqrt(sqrt(pow(x[0]-V*(tau+0.1),2)+pow(x[1],2))/(2*pi))*(kap-cos(atan2(x[1], (x[0]-V*(tau+0.1)))))*sin(atan2(x[1], (x[0]-V*(tau+0.1)))/2))",
+                    degree=4, t=0, tau=0, V=20, K1=30, mu=4336.28, kap=2.54)
+    
+    # Displacement BCs: Fix x-displacement at "righttop" and prescribe y-displacement on Top and Bottom.
+    bc_rt = DirichletBC(V.sub(0), Constant(0.0), righttop, method='pointwise')
     bc_bot = DirichletBC(V.sub(1), r, facets, 22)
     bc_top = DirichletBC(V.sub(1), r, facets, 21)
     bcs = [bc_rt, bc_bot, bc_top]
-
-    cz=Constant(1.0)
+    
+    # Phase-field BCs: Impose z = 1 on Top and Bottom and z = 0 on the Crack.
+    cz   = Constant(1.0)
+    cz2  = Constant(0.0)
     bcb_z = DirichletBC(Y, cz, facets, 22)
     bct_z = DirichletBC(Y, cz, facets, 21)
-    cz2=Constant(0.0)
     bcc_z = DirichletBC(Y, cz2, facets, 25)
-    bcs_z=[bcb_z, bct_z]
-
-    bcb_du=DirichletBC(V.sub(1),Constant(0.0), facets, 22)
-    bct_du=DirichletBC(V.sub(1),Constant(0.0),facets, 21)
+    bcs_z = [bcb_z, bct_z]
+    
+    # Additional stabilization BCs for u_y (if needed)
+    bcb_du = DirichletBC(V.sub(1), Constant(0.0), facets, 22)
+    bct_du = DirichletBC(V.sub(1), Constant(0.0), facets, 21)
     bcs_du = [bc_rt, bcb_du, bct_du]
 
-elif DirichletBC_choice == 2:                                 # Mode I
+elif DirichletBC_choice == 2:   # Mode I
+    # No displacement on u_y
     c = Expression("t*0.0", degree=1, t=0)
     bc_rt = DirichletBC(V.sub(0), Constant(0.0), righttop, method='pointwise')
     bc_bot = DirichletBC(V.sub(1), c, facets, 22)
@@ -267,106 +338,98 @@ elif DirichletBC_choice == 2:                                 # Mode I
     cz = Constant(1.0)
     bcb_z = DirichletBC(Y, cz, facets, 22)
     bct_z = DirichletBC(Y, cz, facets, 21)
-    cz2=Constant(0.0)
+    cz2 = Constant(0.0)
     bct_z2 = DirichletBC(Y, cz2, cracktip)
-    bcs_z=[bcb_z, bct_z]
-
-    # Define Neumann boundary conditions
-    sigma_critical_crack = sqrt(E*Gc/np.pi/ac)/((0.752+2.02*(ac/W)+0.37*(1-np.sin(np.pi*ac/2/W))**3)*(sqrt(2*W/np.pi/ac*np.tan(np.pi*ac/2/W)))/(np.cos(np.pi*ac/2/W)))
-    if sigma_critical_crack>sts:
-        sigma_critical = sts
-    else:
-        sigma_critical = sigma_critical_crack
-
-    sigma_external = loadfactor*sigma_critical
-
-    Tf = Expression(("t*0.0", "t*sigma"), degree=1, t=0, sigma=sigma_external)
+    bcs_z = [bcb_z, bct_z]
     
+    # Define Neumann BC (loading) for Mode I
+    sigma_critical_crack = sqrt(E*Gc/np.pi/ac) / ((0.752 + 2.02*(ac/W) + 0.37*(1 - np.sin(np.pi*ac/2/W))**3) *
+                                                   (sqrt(2*W/np.pi/ac * np.tan(np.pi*ac/2/W)))/(np.cos(np.pi*ac/2/W)))
+    sigma_critical = sts if sigma_critical_crack > sts else sigma_critical_crack
+    sigma_external = loadfactor * sigma_critical
+    Tf = Expression(("t*0.0", "t*sigma"), degree=1, t=0, sigma=sigma_external)
 
-elif DirichletBC_choice == 3:                                 # Mode II
+elif DirichletBC_choice == 3:   # Mode II
     c = Expression(("d_u * t", "t*0.0"), degree=1, t=0, d_u=disp)
-
-    bc_bot = DirichletBC(V, Constant(0.0,0.0), facets, 22)
+    bc_bot = DirichletBC(V, Constant((0.0, 0.0)), facets, 22)
     bc_top = DirichletBC(V, c, facets, 21)
     bcs = [bc_bot, bc_top]
-
+    
     cz = Constant(1.0)
     bcb_z = DirichletBC(Y, cz, facets, 22)
     bct_z = DirichletBC(Y, cz, facets, 21)
-    cz2=Constant(0.0)
+    cz2 = Constant(0.0)
     bct_z2 = DirichletBC(Y, cz2, cracktip)
-    bcs_z=[bcb_z, bct_z]
+    bcs_z = [bcb_z, bct_z]
 
-elif DirichletBC_choice == 4:                                 # Mode III
-
+elif DirichletBC_choice == 4:   # Mode III
     r = Expression(("t*0.0", "t*0.0", "t*disp"), degree=1, t=0, disp=disp)
     r0 = Expression(("t*0.0", "t*0.0", "(t-tau)*disp"), degree=1, t=0, tau=0, disp=disp)
     c = Expression(("t*0.0", "t*0.0", "t*0.0"), degree=1, t=0)
-
-    bc_top = DirichletBC(V, r, facets, 21)
-    bc_bot = DirichletBC(V, c, facets, 22)
+    
+    bc_top = DirichletBC(V.sub(2), r, facets, 21)
+    bc_bot = DirichletBC(V.sub(2), c, facets, 22)
     bcs = [bc_bot, bc_top]
-
+    
     bc_top0 = DirichletBC(V.sub(2), r0, facets, 21)
     bcs_du0 = [bc_top0, bc_bot]
-
-    bc_top1 = DirichletBC(V, c, facets, 21)
+    
+    bc_top1 = DirichletBC(V.sub(2), c, facets, 21)
     bcs_du = [bc_top1, bc_bot]
-
+    
     cz = Constant(1.0)
     cz2 = Constant(0.0)
     bct_z = DirichletBC(Y, cz, outer)
     bct_z2 = DirichletBC(Y, cz2, cracktip)
     bcs_z = [bct_z]
 
-elif DirichletBC_choice == 5:                                 # Biaxial
+elif DirichletBC_choice == 5:   # Biaxial
     c = Expression("t*0.0", degree=1, t=0)
-
     bc_left = DirichletBC(V.sub(0), c, facets, 23)
     bc_bot = DirichletBC(V.sub(1), c, facets, 22)
     bcs = [bc_left, bc_bot]
-
+    
     cz = Constant(1.0)
     bct_z = DirichletBC(Y, cz, outer)
     cz2 = Constant(0.0)
     bct_z2 = DirichletBC(Y, cz2, cracktip)
     bcs_z = []
-
+    
     sigma_external = 1.05 * sqrt(E * Gc / np.pi / ac)
     Tf = Expression("t*sigma", degree=1, t=0, sigma=sigma_external)
 
-elif DirichletBC_choice == 6:                                                             # Pure Shear
+elif DirichletBC_choice == 6:   # Pure Shear
     c = Expression(("t*0.0", "t*0.0"), degree=1, t=0)
     bc_lb = DirichletBC(V, c, leftbot, method='pointwise')
     bcs = [bc_lb]
-
+    
     cz = Constant(1.0)
     bct_z = DirichletBC(Y, cz, outer)
     cz2 = Constant(0.0)
     bct_z2 = DirichletBC(Y, cz2, cracktip)
     bcs_z = []
-
+    
     sigma_external = 1.1 * sqrt(E * Gc / np.pi / ac)
     Tf = Expression("t*sigma", degree=1, t=0, sigma=sigma_external)
 
-elif DirichletBC_choice == 7:                                 # 4-P Bending
-
-    cr=Expression(("t*0.0", "t*0.0", "t*0.0"),degree=1,t=0)
-    crr=Expression("t*0.0",degree=1,t=0)
-    cl=Expression("-du*t", degree=1, t=0, du=disp)
-
-    bcrl = DirichletBC(V, cr, Rleft)                     # Left Reaction Restraint
-    bcrry = DirichletBC(V.sub(1), crr, Rright)           # Right Reaction Restraint
-    bcrrz = DirichletBC(V.sub(2), crr, Rright)           # Right Reaction Restraint
-    bcll = DirichletBC(V.sub(1), cl, Pleft)              # Left Loading Point
-    bclr = DirichletBC(V.sub(1), cl, Pright)             # Right Loading Point
+elif DirichletBC_choice == 7:   # 4-P Bending
+    cr = Expression(("t*0.0", "t*0.0", "t*0.0"), degree=1, t=0)
+    crr = Expression("t*0.0", degree=1, t=0)
+    cl = Expression("-du*t", degree=1, t=0, du=disp)
+    
+    bcrl = DirichletBC(V, cr, Rleft)             # Left Reaction Restraint
+    bcrry = DirichletBC(V.sub(1), crr, Rright)   # Right Reaction Restraint
+    bcrrz = DirichletBC(V.sub(2), crr, Rright)   # Right Reaction Restraint
+    bcll = DirichletBC(V.sub(1), cl, Pleft)      # Left Loading Point
+    bclr = DirichletBC(V.sub(1), cl, Pright)     # Right Loading Point
     bcs = [bcrl, bcrry, bcrrz, bcll, bclr]
-
-    cz=Constant(1.0)
+    
+    cz = Constant(1.0)
     bct_z = DirichletBC(Y, cz, outer)
-    cz2=Constant(0.0)
+    cz2 = Constant(0.0)
     bct_z2 = DirichletBC(Y, cz2, cracktip)
-    bcs_z=[bct_z]   
+    bcs_z = [bct_z]
+
 
 
 # ___________________________________________________________________________________________________________________________________________________________
@@ -845,7 +908,7 @@ elif phase_model == 2:
     
     # Balance of configurational forces PDE
     Wv = pen / 2 * ((abs(z) - z)**2 + (abs(1 - z) - (1 - z))**2) * dx
-    Wv2 = conditional(le(z, 0.05), 1, 0) * 40 * pen / 2 * (1 / 4 * (abs(z_prev - z) - (z_prev - z))**2) * dx
+    Wv2 = conditional(le(z, 0.05), 1, 0) * z_penalty_factor * pen / 2 * (1 / 4 * (abs(z_prev - z) - (z_prev - z))**2) * dx
     R_z = -Y_wu * y * dx + (1 / (1 + h / (pi * eps))) * Gc / pi * (y * (-2 * z) / eps + 2 * eps * inner(grad(z), grad(y))) * dx + derivative(Wv, z, y) + derivative(Wv2, z, y)
     
     # Compute Jacobian of R_z
@@ -959,7 +1022,7 @@ elif phase_model == 3:
 
     # Balance of configurational forces PDE
     Wv = pen / 2 * ((abs(z) - z) ** 2 + (abs(1 - z) - (1 - z)) ** 2) * dx
-    Wv2 = 40 * pen / 2 * (1 / 4 * (abs(z_prev - z) - (z_prev - z)) ** 2) * dx
+    Wv2 = z_penalty_factor * pen / 2 * (1 / 4 * (abs(z_prev - z) - (z_prev - z)) ** 2) * dx
 
     R_z = y * 2 * z * psi11 * dx + (1 / (1 + 3 * h / (8 * eps))) * 3 * Gc / 8 * (y * (-1) / eps + 2 * eps * inner(grad(z), grad(y))) * dx \
           + derivative(Wv, z, y) + derivative(Wv2, z, y)
@@ -1034,7 +1097,7 @@ elif phase_model == 4:
     
     # Balance of configurational forces PDE
     Wv = pen/2 * (((abs(z) - z)**2) + ((abs(1 - z) - (1 - z))**2)) * dx
-    Wv2 = conditional(le(z, 0.05), 1, 0) * 40 * pen/2 * (1/4 * (abs(z_prev - z) - (z_prev - z))**2) * dx
+    Wv2 = conditional(le(z, 0.05), 1, 0) * z_penalty_factor * pen/2 * (1/4 * (abs(z_prev - z) - (z_prev - z))**2) * dx
     R_z = z * D_d * y * dx + (y * (z - 1) + eps**2 * inner(grad(z), grad(y))) * dx  # + derivative(Wv, z, y) + derivative(Wv2, z, y)
     
     # Compute the Jacobian of R_z
@@ -1167,52 +1230,45 @@ while t-stepsize < T:
         #First PDE
         ##############################################################        
 
-        if linear_solver_for_u==1:
-            a_u = inner(stress, epsilon(v))*dx
-            L_u = inner(Tf, v)*ds(1)
+        if linear_solver_for_u == 1:
+            # Linear solver: solve the displacement equation using a Krylov method.
+            a_u = inner(stress, epsilon(v)) * dx
+            L_u = inner(Tf, v) * ds(1)
             Jac_u, Res_u = assemble_system(a_u, L_u, bcs)
-
-            # Create solver instance
             linearsolver = KrylovSolver("cg", precond)
-            # Set solver parameters
             linearsolver.parameters.update(linear_solver_parameters)
             linearsolver.solve(Jac_u, u.vector(), Res_u)
             converged_u = True
-
-
-        if non_linear_solver_choice==1 or 3:
-            Problem_u = NonlinearVariationalProblem(R, u, bcs, J=Jac)
-            solver_u  = NonlinearVariationalSolver(Problem_u)
-            solver_u.parameters.update(snes_solver_parameters)   
-            (iter, converged_u) = solver_u.solve()	
-
-        else:    
-            nIter = 0
-            rnorm = 10000.0
-            rnorm_prev=10000.0
-            while nIter < 10:
-                nIter += 1
-                
-                if nIter==1 and stag_iter==1:
-                    A, b = assemble_system(Jac, -R, bcs_du0)
-                else:
-                    A, b = assemble_system(Jac, -R, bcs_du)
-                
-                rnorm=b.norm('l2')
-                
-                if comm_rank==0:
-                    print('Iteration number= %d' %nIter,  'Residual= %e' %rnorm)
-				
-                if rnorm < rtol:             #residual check
-                    break
-                rnorm_prev=rnorm
-
-                converged = solver_u.solve(A, u_inc.vector(), b);
-			
-                if comm_rank==0:
-                    print(converged)
-			
-                u.vector().axpy(1, u_inc.vector())  	
+        else:
+            # Nonlinear solver branch
+            if non_linear_solver_choice == 1 or non_linear_solver_choice == 3:
+                # Use a full nonlinear solve with SNES.
+                Problem_u = NonlinearVariationalProblem(R, u, bcs, J=Jac)
+                solver_u = NonlinearVariationalSolver(Problem_u)
+                solver_u.parameters.update(snes_solver_parameters)
+                (iter, converged_u) = solver_u.solve()
+            elif non_linear_solver_choice == 2:
+                # Use an iterative (staggered) nonlinear approach.
+                nIter = 0
+                rnorm = 1e4  # Initialize residual norm high.
+                while nIter < 10:
+                    nIter += 1
+                    if nIter == 1 and stag_iter == 1:
+                        A, b = assemble_system(Jac, -R, bcs_du0)
+                    else:
+                        A, b = assemble_system(Jac, -R, bcs_du)
+                    rnorm = b.norm('l2')
+                    if comm_rank == 0:
+                        print('Iteration number= %d, Residual= %e' % (nIter, rnorm))
+                        sys.stdout.flush()
+                    if rnorm < rtol:
+                        break
+                    converged = solver_u.solve(A, u_inc.vector(), b)
+                    if comm_rank == 0:
+                        print(converged)
+                        sys.stdout.flush()
+                    u.vector().axpy(1, u_inc.vector())
+                converged_u = (rnorm < rtol)
 
 
 		##############################################################
@@ -1228,9 +1284,11 @@ while t-stepsize < T:
         zmin = MPI.min(comm, min_z)
         if comm_rank==0:
             print(zmin)
+            sys.stdout.flush()
             
         if comm_rank==0:
             print("--- %s seconds ---" % (time.time() - start_time))
+            sys.stdout.flush()
 
 
         ###############################################################
@@ -1238,7 +1296,7 @@ while t-stepsize < T:
         ###############################################################
         b=assemble(-R, tensor=b)
         fint=b.copy() #assign(fint,b) 
-        for bc in bcs:
+        for bc in bcs_du:
             bc.apply(b)
         rnorm_stag=b.norm('l2')	
         if comm_rank==0:
@@ -1268,10 +1326,6 @@ while t-stepsize < T:
         stag_flag = 1
         break
 
-    assign(u, u_prev)
-    assign(z, z_prev)
-
-
 
     # ___________________________________________________________________________________________________________________________________________________________
 
@@ -1285,7 +1339,7 @@ while t-stepsize < T:
 
     def write_to_file(filename, data, mode='a'):
         with open(filename, mode) as rfile:
-            rfile.write("{} {} {}\n".format(*data))
+            rfile.write("{} {}\n".format(*data))
 
     def save_xdmf(ac, step, u, z, t):
         file_results = XDMFFile("Paraview_ac=" + str(ac) + "/SENT_" + str(step) + ".xdmf")
@@ -1295,11 +1349,6 @@ while t-stepsize < T:
         z.rename("z", "phase field")
         file_results.write(u, t)
         file_results.write(z, t)
-
-    # Common variables
-    comm = MPI.comm_world
-    comm_rank = MPI.rank(comm)
-    step = 0  # Assuming step is defined elsewhere
 
     # Post-processing based on problem_type
     if problem_type == 1:                                                                      # Surfing problem
@@ -1312,7 +1361,7 @@ while t-stepsize < T:
             write_to_file('Surfing_ce.txt', [t, Jintegral])
 
         if step % paraview_at_step == 0:
-            save_xdmf("FullModel/Surfing_ce", u, z, t, step)
+            save_xdmf("FullModel/Surfing_ce", step, u, z, t)
 
     elif problem_type == 2:                                                                    # Mode I
         Fx = calculate_reaction(fint, y_dofs_top, MPI.COMM_WORLD)
@@ -1326,7 +1375,7 @@ while t-stepsize < T:
         if step % paraview_at_step == 0:
             save_xdmf(ac, step, u, z, t)
 
-        if z_x < 0.1:
+        if z_x < z_crit:
             t1 = t
             break
 
@@ -1346,7 +1395,7 @@ while t-stepsize < T:
         if step % paraview_at_step == 0:
             save_xdmf("Paraview/SENT", u, z, t, step)
 
-        if z_x < 0.01:
+        if z_x < z_crit:
             break
 
     elif problem_type == 4:                                                                    # Mode III
@@ -1373,7 +1422,7 @@ while t-stepsize < T:
         if step % paraview_at_step == 0:
             save_xdmf(f"Paraview_ac={2 * ac}/SENT", u, z, t, step)
 
-        if z_x < 0.05:
+        if z_x < z_crit:
             t1 = t
             break
 
@@ -1393,7 +1442,7 @@ while t-stepsize < T:
         if step % paraview_at_step == 0:
             save_xdmf("Paraview/SENT", u, z, t, step)
 
-        if min(z_x) < 0.01:
+        if min(z_x) < z_crit:
             t1 = t
             break
 
@@ -1423,7 +1472,7 @@ while t-stepsize < T:
 
     # ___________________________________________________________________________________________________________________________________________________________
 
-
+    
     # Time-stepping update (combined)
     ######################################################################
     if terminate:
@@ -1490,7 +1539,9 @@ while t-stepsize < T:
             else:
                 stepsize = T - t
                 t += stepsize
-            samesizecount = 1       
+            samesizecount = 1      
+            
+            
 
 
     
